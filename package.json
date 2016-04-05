@@ -1,0 +1,18 @@
+{
+  "name": "sn-attachment-utility",
+  "version": "1.0.0",
+  "description": "",
+  "main": "sn-attach.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Josh Nerius <josh.nerius@servicenow.com>",
+  "license": "ISC",
+  "dependencies": {
+    "restler": "*",
+    "request": "*",
+    "cmdln": "3.5.3",
+    "commander": "*",
+    "simple-oauth2": "*"
+  }
+}
