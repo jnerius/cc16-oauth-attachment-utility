@@ -11,8 +11,11 @@
   "dependencies": {
     "restler": "*",
     "request": "*",
+    "mime": "*",
     "cmdln": "3.5.3",
     "commander": "*",
-    "simple-oauth2": "*"
+    "simple-oauth2": "*",
+    "oauth": "*",
+    "prompt": "*"
   }
 }
