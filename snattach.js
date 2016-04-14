@@ -4,67 +4,41 @@ var fs      = require('fs');
 var path    = require('path');
 var util    = require('util');
 var mime    = require('mime');
-var cmdln   = require('cmdln');
 var rest    = require('restler');
 var config  = require('./config.js');
 var program = require('commander');
 var OAuth2  = require('oauth').OAuth2;
+var prompt  = require('prompt');
 
-var credentials = {
-    clientID:     config.clientID,
-    clientSecret: config.clientSecret,
-    site:         config.instanceURL,
-    tokenPath:    '/oauth_token.do'
-};
+var debug = true;
 
-var oauth   = require('./sn_api/oauth.js')(credentials);
+// Pull in our saved auth details
+var auth = require('./auth.json');
 
+/**
+ * Saves the current state of the auth object into a JSON file
+ * @param  {[type]}   auth [Object representing the current auth state]
+ * @param  {Function} cb   [Callback]
+ */
+function saveAuthState(auth, cb) {
+    fs.writeFile("auth.json", JSON.stringify(auth, null, 4), 'utf-8', function(err) {
+        if (err) {
+            console.log('Error saving auth data:', err);
+            cb(err);
+        } else {
+            cb();
+        }
+    })
+}
 
-var oauth2 = require('simple-oauth2')(credentials);
-var token;
-
-/*
-oauth2.client.getToken({}, function saveToken(error, result) {
-    if (error) { console.log('Access Token Error', error.message); }
-    token = oauth2.accessToken.create(result);
-    console.log('Token', token.token.access_token);
-});
-*/
-
-var ServiceNow = rest.service(function(u, p) {
+var ServiceNow = rest.service(function(options) {
     this.tokenPath = '/oauth_token.do';
-    this.defaults.username = u;
-    this.defaults.password = p;
-
-    /*
-    var token; 
-
-    var oauth2 = new OAuth2(config.clientID, 
-        config.clientSecret,
-        config.instanceURL, 
-        null, 
-        '/oauth_token.do', 
-        null);
-
-    oauth2.getOAuthAccessToken('', {
-        'grant_type': 'password',
-        'username': config.username,
-        'password': config.password
-    }, function(e, access_token, refresh_token, results) {
-        console.log('e: ', e);
-        console.log('bearer: ', access_token);
-        console.log('refresh: ', refresh_token);
-        console.log('results: ', results);
-        token = access_token;
-    }).then(function() {
-        console.log('token out of the callback: ', token);
-    });
-    */
+    this.defaults = options; 
 }, {
     baseURL: config.instanceURL
 }, {
     uploadAttachment: function(filename, data, contentType, table, record) {
-        return this.post(config.instanceURL + '/api/now/attachment/file', {
+        return this.post('/api/now/attachment/file', {
             headers: {
                 'Content-Type': contentType
             },
@@ -77,24 +51,19 @@ var ServiceNow = rest.service(function(u, p) {
         });
     }, 
 
-    test: function() {
-        console.log('in test method');
-    },
-
-    authOAuth: function(clientID, clientSecret, tokenPath) {
-        return this.post(config.instanceURL + this.tokenPath, {
+    listAttachmentsForRecord: function(table, record) {
+        return this.get('/api/now/attachment', {
             query: {
-                grant_type: 'password',
-                client_id: clientID,
-                client_secret: clientSecret, 
-                username: this.defaults.username, 
-                password: this.defaults.password
+                table_name: table,
+                table_sys_id: record
             }
-        });
+        }); 
     },
 });
 
-sn = new ServiceNow(config.username, config.password);
+sn = new ServiceNow({
+    accessToken: auth.accessToken
+});
 
 program
     .version('0.0.1')
@@ -102,11 +71,97 @@ program
     .option('-u, --user [username]',     'Log in using this username')
     .option('-p, --pass [password]',     'Log in using this password');
 
+/**
+ * Login command
+ *
+ * Allows us to log in to the ServiceNow instance using Basic auth or OAuth 2
+ */
 program
-    .command('authenticate <type>')
+    .command('login <type> [subcommand]')
     .description('configure authentication')
     .action(function(type) {
-        console.log('authentication type: ', type);
+
+        if (type == 'oauth') {
+            var oauthSchema = {
+                properties: {
+                    username: { description: 'ServiceNow Username'},
+                    password: { description: 'ServiceNow Password',  hidden: true }
+                }
+            };
+
+            if (!auth.clientID) 
+                oauthSchema.properties.clientID = { description: 'OAuth Client ID'};
+
+            if (!auth.clientSecret)
+                oauthSchema.properties.clientSecret = { description: 'OAuth Client Secret', hidden: true };
+
+            prompt.start();
+            prompt.get(oauthSchema, function(err, result) {
+
+                // Update the stored clientID and clientSecret if they were provided
+                if (result.clientID) 
+                    auth.clientID = result.clientID;
+
+                if (result.clientSecret) 
+                    auth.clientSecret = result.clientSecret;
+
+                // Now let's get a token. First, a bit of setup. 
+                var oauth2 = new OAuth2(auth.clientID, 
+                    auth.clientSecret,
+                    config.instanceURL, 
+                    null, 
+                    '/oauth_token.do', 
+                    null);
+
+                // And now, the actual call. 
+                oauth2.getOAuthAccessToken('', {
+                    'grant_type': 'password',
+                    'username': result.username,
+                    'password': result.password
+                }, function(e, access_token, refresh_token, results) {
+                    if (debug) console.log('results: ', results);
+
+                    auth.accessToken  = access_token;
+                    auth.refreshToken = refresh_token;
+
+                    saveAuthState(auth, function(err) {
+                        if (err) process.exit();
+                    });
+                });
+            });
+
+        } else if (type == 'basic') {
+            var basicAuthSchema = {
+                properties: {
+                    username: { description: 'ServiceNow Username'},
+                    password: { description: 'ServiceNow Password',  hidden: true }
+                }
+            };
+
+            prompt.start();
+            prompt.get(basicAuthSchema, function(err, result) {
+                auth.username = result.username;
+                auth.password = result.password; 
+
+                saveAuthState(auth, function(err) {
+                    if (err) process.exit(); 
+                });
+            });
+        } else if (type == 'reset') {
+            console.log("Resetting auth data...");
+
+            auth.clientID     = '';
+            auth.clientSecret = '';
+            auth.accessToken  = '';
+            auth.refreshToken = '';
+            auth.cookie       = '';
+            auth.username     = '';
+            auth.password     = '';
+
+            saveAuthState(auth, function(){}); 
+        } else {
+            console.log('authentication type not supported');
+        }
     });
     
 program
@@ -121,27 +176,6 @@ program
                 console.log('  file url:', data.result.download_link);
                 console.log('  attachment id:', data.result.sys_id);
             });;
-            /*
-            rest.post(config.instanceURL + '/api/now/attachment/file', {
-                username: config.username,
-                password: config.password,
-                headers: {
-                    'Content-Type': mime.lookup(file)
-                },
-                query: {
-                    table_name: table,
-                    table_sys_id: record,
-                    file_name: path.basename(file)
-                }, 
-                data: data
-            }).on('complete', function(data) {
-                console.log('File uploaded successfully');
-                console.log('  file url:', data.result.download_link);
-                console.log('  attachment id:', data.result.sys_id);
-            });
-            */
-            
-            
         });
     });
      
@@ -150,25 +184,16 @@ program
     .description('list all attachments related to the specified table/record')
     .action(function(table, record) {
         console.log('table:', table, 'record:', record);
-        
-        rest.get(config.instanceURL + '/api/now/attachment', {
-            username: config.username, 
-            password: config.password,
-            query: {
-                table_name: table,
-                table_sys_id: record
-            }
-        }).on('complete', function(data) {
+
+        sn.listAttachmentsForRecord(table, record).on('complete', function(data) {
             if (data instanceof Error) {
-                console.log('Error: ', data.message);
+                console.log('Error retrieving attachment list:', data);
             } else {
                 data.result.forEach(function(attachment) {
                     console.log('name:', attachment.file_name, 'type:', attachment.content_type, 'size:', attachment.size_bytes); 
                 });
-                
-                //console.log(data);
             }
-        }); 
+        });
     });
        
 program
