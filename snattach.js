@@ -17,8 +17,6 @@ var auth = require('./auth.json');
 
 /**
  * Saves the current state of the auth object into a JSON file
- * @param  {[type]}   auth [Object representing the current auth state]
- * @param  {Function} cb   [Callback]
  */
 function saveAuthState(auth, cb) {
     fs.writeFile("auth.json", JSON.stringify(auth, null, 4), 'utf-8', function(err) {
@@ -50,6 +48,10 @@ var ServiceNow = rest.service(function(options) {
             data: data 
         });
     }, 
+
+    downloadAttachment: function(attachmentSysId) {
+        return this.get('/api/now/attachment/' + attachmentSysId + '/file'); 
+    },
 
     listAttachmentsForRecord: function(table, record) {
         return this.get('/api/now/attachment', {
@@ -201,6 +203,9 @@ program
     .description('download the attachment associated with the given attachment sys_id')
     .action(function(attachment) {
         console.log('download...'); 
+        sn.downloadAttachment(attachment).on('complete', function(data) {
+            console.log(data);
+        });
     });
     
 program.parse(process.argv);
