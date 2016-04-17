@@ -29,6 +29,14 @@ function saveAuthState(auth, cb) {
     })
 }
 
+function onAPIError(data, response) {
+    console.log('Request failed with status code', response.statusCode, '-', response.statusMessage);
+    console.log(data);
+    switch(response.statusCode) {
+        case 401: console.log('Try refreshing the OAuth Token');
+    }
+}
+
 var ServiceNow = rest.service(function(options) {
     this.tokenPath = '/oauth_token.do';
     this.defaults = options; 
@@ -81,9 +89,42 @@ program
 program
     .command('login <type> [subcommand]')
     .description('configure authentication')
-    .action(function(type) {
+    .action(function(type, subcommand) {
 
         if (type == 'oauth') {
+            /**
+             * Get a Refresh Token
+             */
+            if (subcommand == 'refresh') {
+                console.log('Attempting to get a fresh Access Token...');
+                var oauth2 = new OAuth2(auth.clientID, 
+                    auth.clientSecret,
+                    config.instanceURL, 
+                    null, 
+                    '/oauth_token.do', 
+                    null);
+
+                oauth2.getOAuthAccessToken(auth.refreshToken, {
+                    'grant_type': 'refresh_token',
+                }, function(e, access_token, refresh_token, results) {
+                    console.log('e->', e);
+                    console.log('access_token->', access_token);
+                    console.log('refresh_token->', refresh_token);
+                    console.log('results->', results);
+
+                    auth.accessToken  = access_token;
+                    auth.refreshToken = refresh_token;
+
+                    saveAuthState(auth, function(err) {
+                        if (err) process.exit();
+                    });
+                });
+
+                // Stop execution now
+                return;
+            }
+
+            // No subcommand, so let's assume we're trying to get a token from scratch
             var oauthSchema = {
                 properties: {
                     username: { description: 'ServiceNow Username'},
@@ -173,11 +214,14 @@ program
         console.log('upload: file =', file, ', table =', table, ', record = ', record);
         
         fs.readFile(file, function(err, data) {
-            sn.uploadAttachment(path.basename(file), data, mime.lookup(file), table, record).on('complete', function(data) {
+            sn.uploadAttachment(path.basename(file), data, mime.lookup(file), table, record).on('success', function(data) {
                 console.log('File uploaded successfully');
                 console.log('  file url:', data.result.download_link);
                 console.log('  attachment id:', data.result.sys_id);
-            });;
+            }).on('fail', function(data) {
+                console.log('Upload failed...');
+                console.log(data);
+            });
         });
     });
      
@@ -187,7 +231,7 @@ program
     .action(function(table, record) {
         console.log('table:', table, 'record:', record);
 
-        sn.listAttachmentsForRecord(table, record).on('complete', function(data) {
+        sn.listAttachmentsForRecord(table, record).on('success', function(data) {
             if (data instanceof Error) {
                 console.log('Error retrieving attachment list:', data);
             } else {
@@ -195,17 +239,35 @@ program
                     console.log('name:', attachment.file_name, 'type:', attachment.content_type, 'size:', attachment.size_bytes); 
                 });
             }
+        }).on('fail', function(data) {
+            console.log('Listing attachments failed...');
+            console.log(data);
         });
     });
        
 program
     .command('download <attachment_sys_id> [location]')
     .description('download the attachment associated with the given attachment sys_id')
-    .action(function(attachment) {
-        console.log('download...'); 
-        sn.downloadAttachment(attachment).on('complete', function(data) {
-            console.log(data);
-        });
+    .action(function(attachment, location) {
+        sn.downloadAttachment(attachment).on('success', function(data, response) {
+            // Get info about the attachment from x-attachment-metadata response header
+            var meta  = JSON.parse(response.headers['x-attachment-metadata']);
+            var fName = meta.file_name;
+            var table = meta.table_name;
+            var sysId = meta.table_sys_id;
+
+            // If a location has been specified, join it with the filename
+            var file = location ? path.join(location, fName) : fName; 
+
+            // Save the actual file
+            fs.writeFile(file, response.raw, function(err) {
+                if (err) {
+                    return console.log(err);
+                }
+
+                console.log('Downloaded file \'' + file + '\' from record ' + table + '.' + sysId)
+            });
+        }).on('fail', onAPIError);
     });
     
 program.parse(process.argv);
