@@ -85,6 +85,7 @@ var ServiceNow = rest.service(function(options) {
         var self = this;
         var req = this[method](url, options);
 
+        /*
         // If we encounter a 401, the access token most likely expired
         req.on('401', function(data, response) {
             // Refresh the token
@@ -98,6 +99,7 @@ var ServiceNow = rest.service(function(options) {
                 }
             })
         });
+        */
 
         return req;
     },
