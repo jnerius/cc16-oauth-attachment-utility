@@ -85,12 +85,16 @@ var ServiceNow = rest.service(function(options) {
         var self = this;
         var req = this[method](url, options);
 
+        // If we encounter a 401, the access token most likely expired
         req.on('401', function(data, response) {
+            // Refresh the token
             self._refreshToken(function(err, access_token, refresh_token, results) {
                 if (!err && access_token != '') {
                     // We have a new access token, so we'll set it and retry the request
                     req.options.accessToken = access_token;
                     req.retry();
+                } else {
+                    logger.error('Could not get a new access token');
                 }
             })
         });
@@ -98,7 +102,10 @@ var ServiceNow = rest.service(function(options) {
         return req;
     },
 
-    _refreshToken: function(cb) {
+    /**
+     * Get a new Access Token using our Refresh Token
+     */
+    _refreshToken: function(callback) {
         logger.info('Getting a fresh Access Token...');
         var oauth2 = new OAuth2(auth.clientID, 
                 auth.clientSecret,
@@ -107,6 +114,8 @@ var ServiceNow = rest.service(function(options) {
                 '/oauth_token.do', 
                 null);
 
+        // Get a new access token by passing in the refreshToken saved earlier
+        // Notice that it is not necessary to transmit username/password when using a refresh token. 
         oauth2.getOAuthAccessToken(auth.refreshToken, {
             'grant_type': 'refresh_token',
         }, function(err, access_token, refresh_token, results) {
@@ -120,11 +129,11 @@ var ServiceNow = rest.service(function(options) {
                     if (err) process.exit();
                 });
 
-                cb(null, access_token, refresh_token, results);
+                callback(null, access_token, refresh_token, results);
             } else {
                 logger.error('Error encountered trying to retrieve a fresh token');
                 logger.debug(err);
-                cb(err, null, null, results); 
+                callback(err, null, null, results); 
             }
 
             logger.debug(results);
@@ -228,17 +237,22 @@ program
                     'grant_type': 'password',
                     'username': result.username,
                     'password': result.password
-                }, function(e, access_token, refresh_token, results) {
-                    logger.debug('results: ', results);
+                }, function(err, access_token, refresh_token, results) {
+                    logger.debug('Results: ', results);
 
-                    auth.accessToken  = access_token;
-                    auth.refreshToken = refresh_token;
-
-                    saveAuthState(auth, function(err) {
-                        logger.info('Saving to auth.json...');
-                        if (err) logger.error('Could not save auth info:', err);
-                        process.exit();
-                    });
+                    if (!err && access_token != undefined && refresh_token != undefined) {
+                        logger.info('Retrieved Access Token and Refresh Token')
+                        auth.accessToken  = access_token;
+                        auth.refreshToken = refresh_token;
+                        saveAuthState(auth, function(err) {
+                            logger.info('Saving to auth.json...');
+                            if (err) logger.error('Could not save auth info:', err);
+                            process.exit();
+                        });
+                    } else {
+                        logger.error('Error encountered trying to retrieve a token');
+                        logger.debug(err);
+                    }
                 });
             });
 
