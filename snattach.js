@@ -1,16 +1,18 @@
 #!/usr/bin/env node
 
 var fs      = require('fs');
+var logger  = require('winston');
 var path    = require('path');
-var util    = require('util');
 var mime    = require('mime');
 var rest    = require('restler');
 var config  = require('./config.js');
 var program = require('commander');
 var OAuth2  = require('oauth').OAuth2;
 var prompt  = require('prompt');
+var Table   = require('cli-table');
 
-var debug = true;
+logger.cli();
+logger.level = 'debug';
 
 // Pull in our saved auth details
 var auth = require('./auth.json');
@@ -33,7 +35,7 @@ function onAPIError(data, response) {
     console.log('Request failed with status code', response.statusCode, '-', response.statusMessage);
     console.log(data);
     switch(response.statusCode) {
-        case 401: console.log('Try refreshing the OAuth Token');
+        case 401: logger.warn('Try refreshing the OAuth Token');
     }
 }
 
@@ -43,48 +45,108 @@ var ServiceNow = rest.service(function(options) {
 }, {
     baseURL: config.instanceURL
 }, {
+    getSysIdForTask: function(taskNumber) {
+        return this.doRequest('get', '/api/now/table/task', {
+            query: {
+                number: taskNumber,
+                sysparm_fields: 'sys_id'
+            }
+        });
+    }, 
+
     uploadAttachment: function(filename, data, contentType, table, record) {
-        return this.post('/api/now/attachment/file', {
+        return this.doRequest('post', '/api/now/attachment/file', {
             headers: {
                 'Content-Type': contentType
             },
             query: {
-                table_name: table,
+                table_name:   table,
                 table_sys_id: record,
-                file_name: path.basename(filename)
+                file_name:    path.basename(filename)
             }, 
             data: data 
         });
     }, 
 
     downloadAttachment: function(attachmentSysId) {
-        return this.get('/api/now/attachment/' + attachmentSysId + '/file'); 
+        return this.doRequest('get', '/api/now/attachment/' + attachmentSysId + '/file'); 
     },
 
     listAttachmentsForRecord: function(table, record) {
-        return this.get('/api/now/attachment', {
+        return this.doRequest('get', '/api/now/attachment', {
             query: {
                 table_name: table,
                 table_sys_id: record
             }
         }); 
     },
+
+    doRequest: function(method, url, options) {
+        var self = this;
+        var req = this[method](url, options);
+
+        req.on('401', function(data, response) {
+            self._refreshToken(function(err, access_token, refresh_token, results) {
+                if (!err && access_token != '') {
+                    // We have a new access token, so we'll set it and retry the request
+                    req.options.accessToken = access_token;
+                    req.retry();
+                }
+            })
+        });
+
+        return req;
+    },
+
+    _refreshToken: function(cb) {
+        logger.info('Getting a fresh Access Token...');
+        var oauth2 = new OAuth2(auth.clientID, 
+                auth.clientSecret,
+                config.instanceURL, 
+                null, 
+                '/oauth_token.do', 
+                null);
+
+        oauth2.getOAuthAccessToken(auth.refreshToken, {
+            'grant_type': 'refresh_token',
+        }, function(err, access_token, refresh_token, results) {
+            if (!err) {
+                logger.info('Fresh token acquired');
+                auth.accessToken  = access_token;
+                auth.refreshToken = refresh_token;
+
+                // Save the updated token(s) to auth.json
+                saveAuthState(auth, function(err) {
+                    if (err) process.exit();
+                });
+
+                cb(null, access_token, refresh_token, results);
+            } else {
+                logger.error('Error encountered trying to retrieve a fresh token');
+                logger.debug(err);
+                cb(err, null, null, results); 
+            }
+
+            logger.debug(results);
+        });
+    },
+
+    _isSysId: function(str) {
+        return (str.match(/[0-9a-f]{32}/) != null);
+    }
 });
 
+// Initialize ServiceNow Restler Service Object
 sn = new ServiceNow({
     accessToken: auth.accessToken
 });
 
+// Set up the CLI
 program
-    .version('0.0.1')
-    .option('-i, --instance [instance]', 'Instance prefix, eg. \'empjnerius\'')
-    .option('-u, --user [username]',     'Log in using this username')
-    .option('-p, --pass [password]',     'Log in using this password');
+    .version('0.0.1');
 
 /**
- * Login command
- *
- * Allows us to log in to the ServiceNow instance using Basic auth or OAuth 2
+ * Login command - Allows us to log in to the ServiceNow instance using Basic Auth or OAuth 2
  */
 program
     .command('login <type> [subcommand]')
@@ -92,11 +154,11 @@ program
     .action(function(type, subcommand) {
 
         if (type == 'oauth') {
-            /**
-             * Get a Refresh Token
-             */
+            // subcommand will only contain a value if a refresh is desired
             if (subcommand == 'refresh') {
-                console.log('Attempting to get a fresh Access Token...');
+                logger.debug('Attempting to get a fresh Access Token...');
+
+                // Prepare a new OAuth2 instance using our stored Client ID/Secret
                 var oauth2 = new OAuth2(auth.clientID, 
                     auth.clientSecret,
                     config.instanceURL, 
@@ -104,20 +166,25 @@ program
                     '/oauth_token.do', 
                     null);
 
+                // Issue the request to get a new Access Token. We must pass in our refresh token
                 oauth2.getOAuthAccessToken(auth.refreshToken, {
                     'grant_type': 'refresh_token',
-                }, function(e, access_token, refresh_token, results) {
-                    console.log('e->', e);
-                    console.log('access_token->', access_token);
-                    console.log('refresh_token->', refresh_token);
-                    console.log('results->', results);
+                }, function(err, access_token, refresh_token, results) {
+                    if (!err) {
+                        logger.info('Fresh token acquired');
+                        auth.accessToken  = access_token;
+                        auth.refreshToken = refresh_token;
 
-                    auth.accessToken  = access_token;
-                    auth.refreshToken = refresh_token;
+                        // Save the updated token(s) to auth.json
+                        saveAuthState(auth, function(err) {
+                            if (err) process.exit();
+                        });
+                    } else {
+                        logger.error('Error encountered trying to retrieve a fresh token');
+                        logger.debug(err);
+                    }
 
-                    saveAuthState(auth, function(err) {
-                        if (err) process.exit();
-                    });
+                    logger.debug(results);
                 });
 
                 // Stop execution now
@@ -162,7 +229,7 @@ program
                     'username': result.username,
                     'password': result.password
                 }, function(e, access_token, refresh_token, results) {
-                    if (debug) console.log('results: ', results);
+                    logger.debug('results: ', results);
 
                     auth.accessToken  = access_token;
                     auth.refreshToken = refresh_token;
@@ -191,7 +258,7 @@ program
                 });
             });
         } else if (type == 'reset') {
-            console.log("Resetting auth data...");
+            logger.info("Resetting auth data...");
 
             auth.clientID     = '';
             auth.clientSecret = '';
@@ -203,46 +270,49 @@ program
 
             saveAuthState(auth, function(){}); 
         } else {
-            console.log('authentication type not supported');
+            logger.error('Authentication type not supported');
         }
     });
-    
+
+/**
+ * Upload command - Upload a file and associate it with a specific table/record
+ */
 program
     .command('upload <file> <table> <record>')
     .description('upload a file and associate it with a specific record')
     .action(function(file, table, record) {
-        console.log('upload: file =', file, ', table =', table, ', record = ', record);
+        logger.debug('Upload details: file = ' + file + ', table = ' + table + ', record = ' + record);
         
         fs.readFile(file, function(err, data) {
             sn.uploadAttachment(path.basename(file), data, mime.lookup(file), table, record).on('success', function(data) {
-                console.log('File uploaded successfully');
-                console.log('  file url:', data.result.download_link);
-                console.log('  attachment id:', data.result.sys_id);
-            }).on('fail', function(data) {
-                console.log('Upload failed...');
-                console.log(data);
-            });
+                logger.info('File uploaded successfully');
+                logger.info('  File URL:',      data.result.download_link);
+                logger.info('  Attachment ID:', data.result.sys_id);
+            }).on('fail', onAPIError);
         });
     });
-     
+
+/**
+ * List command - List all attachments associated with the specified table/record
+ */
 program
     .command('list <table> <record>')
     .description('list all attachments related to the specified table/record')
     .action(function(table, record) {
-        console.log('table:', table, 'record:', record);
+        logger.debug('table:', table, 'record:', record);
+
+        var tabOutput = new Table({
+            head: ['Table', 'Record', 'File Name', 'File Type', 'Size']
+        });
 
         sn.listAttachmentsForRecord(table, record).on('success', function(data) {
-            if (data instanceof Error) {
-                console.log('Error retrieving attachment list:', data);
-            } else {
-                data.result.forEach(function(attachment) {
-                    console.log('name:', attachment.file_name, 'type:', attachment.content_type, 'size:', attachment.size_bytes); 
-                });
-            }
-        }).on('fail', function(data) {
-            console.log('Listing attachments failed...');
-            console.log(data);
-        });
+            data.result.forEach(function(att) {
+                // logger.info('name:', attachment.file_name, 'type:', attachment.content_type, 'size:', attachment.size_bytes); 
+                tabOutput.push([att.table_name, att.table_sys_id, att.file_name, att.content_type, att.size_bytes]);
+            });
+
+            console.log(tabOutput.toString());
+        }).on('fail', onAPIError);
     });
        
 program
