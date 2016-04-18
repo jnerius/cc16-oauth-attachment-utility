@@ -235,7 +235,9 @@ program
                     auth.refreshToken = refresh_token;
 
                     saveAuthState(auth, function(err) {
-                        if (err) process.exit();
+                        logger.info('Saving to auth.json...');
+                        if (err) logger.error('Could not save auth info:', err);
+                        process.exit();
                     });
                 });
             });
