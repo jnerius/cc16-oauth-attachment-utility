@@ -318,13 +318,13 @@ program
         logger.debug('table:', table, 'record:', record);
 
         var tabOutput = new Table({
-            head: ['File Name', 'File Type', 'Size', 'Download Link']
+            head: ['Attachment SysID', 'File Name', 'File Type', 'Size']
         });
 
         sn.listAttachmentsForRecord(table, record).on('success', function(data) {
             data.result.forEach(function(att) {
                 // logger.info('name:', attachment.file_name, 'type:', attachment.content_type, 'size:', attachment.size_bytes); 
-                tabOutput.push([att.file_name, att.content_type, att.size_bytes, att.download_link]);
+                tabOutput.push([att.sys_id, att.file_name, att.content_type, att.size_bytes]);
             });
 
             console.log(tabOutput.toString());
