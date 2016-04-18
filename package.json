@@ -1,21 +1,27 @@
 {
-  "name": "sn-attachment-utility",
+  "name": "snattach",
   "version": "1.0.0",
-  "description": "",
-  "main": "sn-attach.js",
+  "description": "Command line app for interacting with the ServiceNow Attachment API",
+  "main": "snattach.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "author": "Josh Nerius <josh.nerius@servicenow.com>",
+  "bin": {
+    "snattach": "snattach.js"
+  },
+  "author": {
+    "name": "Josh Nerius",
+    "email": "josh.nerius@servicenow.com",
+    "url": ""
+  },
   "license": "ISC",
   "dependencies": {
-    "restler": "*",
-    "request": "*",
-    "mime": "*",
-    "cmdln": "3.5.3",
-    "commander": "*",
-    "simple-oauth2": "*",
-    "oauth": "*",
-    "prompt": "*"
+    "restler": "3.4.0",
+    "mime": "1.3.4",
+    "commander": "2.9.0",
+    "oauth": "0.9.14",
+    "prompt": "1.0.0",
+    "winston": "2.2.0",
+    "cli-table": "0.3.1"
   }
 }
