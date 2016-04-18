@@ -304,16 +304,20 @@ program
         logger.debug('table:', table, 'record:', record);
 
         var tabOutput = new Table({
-            head: ['Table', 'Record', 'File Name', 'File Type', 'Size']
+            head: ['File Name', 'File Type', 'Size', 'Download Link']
         });
 
         sn.listAttachmentsForRecord(table, record).on('success', function(data) {
             data.result.forEach(function(att) {
                 // logger.info('name:', attachment.file_name, 'type:', attachment.content_type, 'size:', attachment.size_bytes); 
-                tabOutput.push([att.table_name, att.table_sys_id, att.file_name, att.content_type, att.size_bytes]);
+                tabOutput.push([att.file_name, att.content_type, att.size_bytes, att.download_link]);
             });
 
             console.log(tabOutput.toString());
+
+            if (data.result.length == 0) {
+                logger.info('No attachments found for the specified record');
+            }
         }).on('fail', onAPIError);
     });
        
