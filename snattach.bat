@@ -1,0 +1,1 @@
+node snattach.js %*
