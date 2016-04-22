@@ -12,7 +12,7 @@ The core functionality of this app is intentionally centralized in snattach.js (
 
 ## Installing
 
-     $ git clone https://github.com/jnerius/sn-attachment-util.git
+     $ git clone https://github.com/jnerius/cc16-oauth-attachment-utility.git
      $ cd sn-attachment-util
      $ npm install
 
@@ -24,6 +24,8 @@ Update the `config.instanceURL` variable to point at your ServiceNow instance.
 
 	config.instanceURL = 'https://<instance>.service-now.com/';
 
+## Usage
+
 ### Logging in using OAuth
 
 Issue the following command and then follow the prompts to provide the requested values: Username, Password, OAuth Client ID, OAuth Client Secret
@@ -33,8 +35,6 @@ Issue the following command and then follow the prompts to provide the requested
 ### Manually refreshing OAuth Access Token
 
 	$ snattach login oauth refresh
-
-## Usage
 
 ### Retrieve a list of attachments for a record
 
