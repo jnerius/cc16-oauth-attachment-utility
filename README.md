@@ -13,7 +13,7 @@ The core functionality of this app is intentionally centralized in snattach.js (
 ## Installing
 
      $ git clone https://github.com/jnerius/cc16-oauth-attachment-utility.git
-     $ cd sn-attachment-util
+     $ cd cc16-oauth-attachment-utility
      $ npm install
 
 ## Configuration
